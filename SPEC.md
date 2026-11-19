@@ -19,7 +19,7 @@ GitHub Pages のサブディレクトリ配信に対応するため、すべて�
 * `index.html` — アプリ本体（3ペイン構成＋拡大・全消去確認・設定・ユーザー辞書の4モーダル＋トースト通知）
 * `style.css` — Material Design 3 サーフェス階層・カラートークン・Container Query 動的スケーリング定義
 * `app.js` — 状態管理、文字盤描画、明示的カーソル制御、文脈考慮ワードプレディクション、共起・シーケンス学習、表示／音声分離型 Web Speech API 制御
-* `dict.js` — 国立国語研究所 `brfvep` 基盤＋文科省学年別漢字配当表＋学齢期・AACコア語彙統合辞書（約15,380エントリ・オフライン完結）
+* `dict.js` — 国立国語研究所 `brfvep` 基盤＋文科省学年別漢字配当表＋学齢期・AACコア語彙統合辞書（約15,380エントリ・オフライン完結）。公開版は配信用に形式を変換し（1語1行・`|` 区切り・既定値の省略）、読み込み時に同じ内容へ展開する
 * `manifest.json` — PWAマニフェスト（`name: "KanaGrid"`, `display: "standalone"`, `orientation: "landscape"`）
 * `sw.js` — オフラインキャッシュ用 Service Worker
 * `icon.svg` — ホーム画面・ファビコン用ローカルSVGアイコン
