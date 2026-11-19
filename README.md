@@ -56,7 +56,7 @@
 | 対象 | ライセンス |
 | --- | --- |
 | アプリ本体のコード（`app.js` / `index.html` / `style.css` / `sw.js` / `manifest.json` / アイコン画像 など） | [MIT License](./LICENSE) |
-| 内蔵辞書データ（`dict.js`） | [クリエイティブ・コモンズ 表示 4.0 国際（CC BY 4.0）](https://creativecommons.org/licenses/by/4.0/deed.ja) |
+| 内蔵辞書データ（`dict.js` / `dict-ext.js`） | [クリエイティブ・コモンズ 表示 4.0 国際（CC BY 4.0）](https://creativecommons.org/licenses/by/4.0/deed.ja) |
 | `index.html` / `app.js` 内のインライン SVG アイコン（Google Material Symbols） | [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0) |
 
 ### 辞書データ（`dict.js`）の出典と改変
@@ -72,6 +72,7 @@ KanaGrid 辞書データ © 2026 Toshimitsu Yamaguchi（CC BY 4.0）は、以下
 * 差別語の除外（予測候補に出さないため）
 * 初期重み・語彙レベル・漢字の必要学年・品詞・意味カテゴリ・基本形の付与と、頻出する活用形の展開
 * 学齢期の学校生活語彙・AACコア語彙・文脈候補の追加
+* 都道府県名の追加
 * 公開版の `dict.js` は、配信用に形式を変換しています（内容は同じです）
 
 `dict.js` を再配布・改変する場合は、上記の出典と CC BY 4.0 の表示を残してください。

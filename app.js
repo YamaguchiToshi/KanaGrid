@@ -48,7 +48,8 @@
     theme: 'light',       // 'light' | 'dark'
     level: 7,             // 0: かな, 1〜6: 小1〜小6, 7: 一般（常用漢字）
     keySpeech: 'on',      // 'on' | 'off'
-    speechRate: 1.0       // 0.6 | 0.8 | 1.0 | 1.2 | 1.4
+    speechRate: 1.0,      // 0.6 | 0.8 | 1.0 | 1.2 | 1.4
+    extDict: 'auto'       // 拡張辞書（#31）'auto': 「一般」のときだけ使う | 'on' | 'off'（手で切り替えた設定はレベルを変えても維持）
   };
 
   const CATEGORY_LABELS = {
@@ -62,6 +63,8 @@
   };
 
   const PREDICTION_SLOT_COUNT = 5;
+  const EXT_DICT_SRC = 'dict-ext.js';    // 拡張辞書のファイル（使う設定のときだけ読み込む）
+  const EXT_DICT_AUTO_LEVEL = 7;         // extDict が 'auto' のとき、拡張辞書を使うレベル（一般）
   const SETTINGS_TAP_COUNT = 3;          // 設定ボタンを開くのに必要な連続タップ数
   const SETTINGS_TAP_WINDOW_MS = 800;    // 連続タップとみなす間隔
   const MESSAGE_DOUBLE_TAP_MS = 320;     // メッセージ欄ダブルタップ判定
@@ -338,7 +341,8 @@
     settingsTapTimer: null,
     pendingConfirmAction: null, // 確認ダイアログで実行ボタンが押されたときの処理
     waitingWorker: null,      // 待機中の新しい版の Service Worker
-    updateRequested: false    // 設定画面から更新の適用を求めたか
+    updateRequested: false,   // 設定画面から更新の適用を求めたか
+    extDictStatus: 'idle'     // 拡張辞書の読み込み状態 'idle' | 'loading' | 'loaded'
   };
   state.learningIndex = buildLearningIndex(state.learning);
 
@@ -436,13 +440,16 @@
       theme: parsed.theme === 'dark' ? 'dark' : 'light',
       level,
       keySpeech: parsed.keySpeech === 'off' ? 'off' : 'on',
-      speechRate: Number(parsed.speechRate) || DEFAULT_SETTINGS.speechRate
+      speechRate: Number(parsed.speechRate) || DEFAULT_SETTINGS.speechRate,
+      extDict: parsed.extDict === 'on' || parsed.extDict === 'off' ? parsed.extDict : DEFAULT_SETTINGS.extDict
     };
   }
 
   // 保存に成功したら true。容量不足のときは学習データを間引いて空きを作り、もう一度試す
+  // 拡張辞書の設定は、手で切り替えたときだけ保存する（'auto' は保存しない）
   function saveSettings() {
-    return writeWithLearningFallback(STORAGE_KEYS.SETTINGS, state.settings);
+    const { extDict, ...rest } = state.settings;
+    return writeWithLearningFallback(STORAGE_KEYS.SETTINGS, extDict === 'auto' ? rest : state.settings);
   }
 
   function createEmptyLearning() {
@@ -1153,6 +1160,42 @@
     return boost;
   }
 
+  /* --- 拡張辞書（#31） --- */
+  // 拡張辞書を使うか。手で切り替えていなければ（'auto'）、「一般」のときだけ使う
+  function isExtDictEnabled() {
+    if (state.settings.extDict === 'on') return true;
+    if (state.settings.extDict === 'off') return false;
+    return state.settings.level === EXT_DICT_AUTO_LEVEL;
+  }
+
+  // 使う設定のときだけ、拡張辞書のファイルを読み込む（1回だけ）。読み込めたら候補を作り直す。
+  // 読み込めなかったときは基本辞書だけで動き、次に設定を変えたときにもう一度試す
+  function ensureExtDictLoaded() {
+    if (!isExtDictEnabled() || state.extDictStatus !== 'idle') return;
+    if (Array.isArray(window.AAC_DICTIONARY_EXT)) {
+      state.extDictStatus = 'loaded';
+      return;
+    }
+    state.extDictStatus = 'loading';
+    const script = document.createElement('script');
+    script.src = EXT_DICT_SRC;
+    script.async = true;
+    script.addEventListener('load', () => {
+      state.extDictStatus = 'loaded';
+      computePredictions();
+    });
+    script.addEventListener('error', () => {
+      state.extDictStatus = 'idle';
+      script.remove();
+    });
+    document.head.appendChild(script);
+  }
+
+  function getExtDictEntries() {
+    if (!isExtDictEnabled() || !Array.isArray(window.AAC_DICTIONARY_EXT)) return [];
+    return window.AAC_DICTIONARY_EXT;
+  }
+
   // ユーザー辞書を内部エントリ形式に変換
   function getUserDictEntries() {
     return state.userDict.map((u) => ({
@@ -1278,8 +1321,9 @@
     return ids;
   }
 
-  // 【ケースB】1文字以上の読み入力中：前方一致・部分一致＋連続入力内の助詞境界による後半予測
-  function collectCandidatesForReading(reading, activeTokens, allDict, level) {
+  // 【ケースB】1文字以上の読み入力中：前方一致・部分一致＋連続入力内の助詞境界による後半予測。
+  // 基本辞書（個人辞書を含む）の候補と、拡張辞書の候補を分けて返す（並べ方は selectPredictions）
+  function collectCandidatesForReading(reading, activeTokens, allDict, extDict, level) {
     const candidates = [];
 
     for (let i = 0; i < allDict.length; i++) {
@@ -1301,7 +1345,8 @@
         candidates.push({
           entry,
           replaceStart: reading.start,
-          score: entry.w * 0.45 + levelAdj + ctxBoost
+          score: entry.w * 0.45 + levelAdj + ctxBoost,
+          infix: true
         });
       }
     }
@@ -1346,7 +1391,61 @@
       }
     }
 
-    return candidates;
+    // 拡張辞書は前方一致だけを使う（地名などで部分一致の候補があふれないように）
+    const extCandidates = [];
+    for (let i = 0; i < extDict.length; i++) {
+      const entry = extDict[i];
+      if (!entry.r.startsWith(reading.normalized)) continue;
+      const levelAdj = getVocabLevelAdjustment(entry, level);
+      if (levelAdj < -500) continue;
+      const exactBonus = entry.r === reading.normalized ? 45 : 0;
+      const lenDiffPenalty = Math.min(20, (entry.r.length - reading.normalized.length) * 2);
+      extCandidates.push({
+        entry,
+        replaceStart: reading.start,
+        score: entry.w + levelAdj + exactBonus - lenDiffPenalty + computeContextBoost(entry, activeTokens)
+      });
+    }
+
+    return { candidates, extCandidates };
+  }
+
+  const byScoreDesc = (a, b) => b.score - a.score;
+
+  // 5枠の候補を選ぶ（#31）。基本辞書（個人辞書を含む）どうしの順位は、拡張辞書があってもなくても変えない。
+  // 拡張辞書の候補があるときだけ、次の2つを加える。
+  // 1. 拡張語（前方一致）を、基本語の部分一致より前に入れる
+  // 2. 読みが2文字以上で拡張語と完全に一致するのに5枠に入らなかったら、5枠目を拡張語に譲る
+  function selectPredictions(candidates, extCandidates, reading, level) {
+    const readLen = reading.normalized.length;
+    candidates.sort(byScoreDesc);
+    if (extCandidates.length === 0) {
+      return selectDiverseCandidates(candidates, readLen, level);
+    }
+
+    extCandidates.sort(byScoreDesc);
+    const firstInfix = candidates.findIndex((c) => c.infix);
+    const insertAt = firstInfix === -1 ? candidates.length : firstInfix;
+    const merged = candidates.slice(0, insertAt).concat(extCandidates, candidates.slice(insertAt));
+    const selected = selectDiverseCandidates(merged, readLen, level);
+
+    if (readLen < 2 || selected.length < PREDICTION_SLOT_COUNT) return selected;
+    const exact = extCandidates.filter((c) => c.entry.r === reading.normalized);
+    if (exact.length === 0 || selected.some((s) => exact.some((c) => c.entry === s.entry))) return selected;
+
+    const head = selected.slice(0, PREDICTION_SLOT_COUNT - 1);
+    const headSurfaces = new Set(head.map((s) => s.surface));
+    for (let i = 0; i < exact.length; i++) {
+      const surface = resolveSurfaceByLevel(exact[i].entry, level);
+      if (!surface || headSurfaces.has(surface)) continue;
+      return head.concat([{
+        surface,
+        speechText: resolveSpeechText(exact[i].entry),
+        entry: exact[i].entry,
+        replaceStart: exact[i].replaceStart
+      }]);
+    }
+    return selected;
   }
 
   // 5枠多様性フィルタ（scoredCandidates はスコア降順であること）：
@@ -1409,19 +1508,24 @@
     const level = state.settings.level;
     const userEntries = getUserDictEntries();
     const allDict = userEntries.concat(window.AAC_DICTIONARY || []);
+    const extDict = getExtDictEntries();
 
     // 現在の文脈トークン列（区切り文字の後ろにある確定トークンのみ有効）
     const activeTokens = state.sentenceTokens.filter(
       (t) => t.endIndex > reading.delimStart && t.endIndex <= reading.start
     );
 
-    const scoredCandidates = reading.normalized
-      ? collectCandidatesForReading(reading, activeTokens, allDict, level)
-      : collectCandidatesWithoutReading(reading, activeTokens, userEntries, allDict);
-
-    scoredCandidates.sort((a, b) => b.score - a.score);
-
-    state.currentPredictions = selectDiverseCandidates(scoredCandidates, reading.normalized.length, level);
+    if (reading.normalized) {
+      const { candidates, extCandidates } = collectCandidatesForReading(reading, activeTokens, allDict, extDict, level);
+      state.currentPredictions = selectPredictions(candidates, extCandidates, reading, level);
+    } else {
+      // 学習で覚えた「次に選んだ語」は、拡張辞書の語も対象にする
+      const scoredCandidates = collectCandidatesWithoutReading(
+        reading, activeTokens, userEntries, extDict.length ? allDict.concat(extDict) : allDict
+      );
+      scoredCandidates.sort(byScoreDesc);
+      state.currentPredictions = selectDiverseCandidates(scoredCandidates, 0, level);
+    }
     renderPredictions();
   }
 
@@ -2169,6 +2273,7 @@
 
         saveSettings();
         applySettingsToDOM();
+        ensureExtDictLoaded();
         computePredictions();
       });
     });
@@ -2267,6 +2372,7 @@
     restoreDraft();
     applySettingsToDOM();
     renderBoardGrid();
+    ensureExtDictLoaded();
     updateAll();
     bindEvents();
     registerServiceWorker();
