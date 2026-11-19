@@ -2,7 +2,7 @@
 
 // この値は手で変更しない。GitHub Pages への公開時に scripts/build-pages.js が
 // 'kanagrid-<コミットの短縮ハッシュ>' に置き換える（.github/workflows/deploy-pages.yml）。
-const CACHE_NAME = 'kanagrid-ce2cee8';
+const CACHE_NAME = 'kanagrid-a9cb29e';
 const ASSETS = [
   './',
   './index.html',
@@ -51,6 +51,8 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  // 外部オリジン（公開版の Cloudflare Web Analytics 等）はキャッシュせず、ブラウザに任せる
+  if (new URL(event.request.url).origin !== self.location.origin) return;
 
   event.respondWith(
     caches.match(event.request, { ignoreSearch: true }).then((cachedResponse) => {
