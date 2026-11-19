@@ -2,7 +2,7 @@
 
 // この値は手で変更しない。GitHub Pages への公開時に scripts/build-pages.js が
 // 'kanagrid-<コミットの短縮ハッシュ>' に置き換える（.github/workflows/deploy-pages.yml）。
-const CACHE_NAME = 'kanagrid-a9cb29e';
+const CACHE_NAME = 'kanagrid-e9f4ca1';
 const ASSETS = [
   './',
   './index.html',
